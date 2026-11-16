@@ -1,4 +1,5 @@
 import os
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -10,6 +11,10 @@ st.set_page_config(
     page_icon="🚲",
     layout="wide",
 )
+
+ORDER_MUSIM = ["Winter", "Spring", "Summer", "Fall"]
+ORDER_CUACA = ["Clear", "Mist/Cloudy", "Light Rain/Snow", "Heavy Rain/Snow"]
+WARNA_HARI = {"Hari kerja": "#1f77b4", "Akhir pekan / libur": "#ff7f0e"}
 
 
 # Load data
@@ -30,23 +35,32 @@ st.sidebar.header("Filter Data")
 min_date = df["dteday"].min().date()
 max_date = df["dteday"].max().date()
 
-start_date, end_date = st.sidebar.date_input(
+date_range = st.sidebar.date_input(
     label="Rentang Tanggal",
     min_value=min_date,
     max_value=max_date,
-    value=[min_date, max_date],
+    value=(min_date, max_date),
 )
+# date_input mengembalikan 1 tanggal saja jika pengguna baru memilih tanggal awal
+if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    st.sidebar.warning("Pilih tanggal awal dan tanggal akhir.")
+    st.stop()
+
+opsi_musim = [m for m in ORDER_MUSIM if m in df["season"].unique()]
+opsi_cuaca = [c for c in ORDER_CUACA if c in df["weather"].unique()]
 
 selected_seasons = st.sidebar.multiselect(
     label="Pilih Musim",
-    options=df["season"].unique().tolist(),
-    default=df["season"].unique().tolist(),
+    options=opsi_musim,
+    default=opsi_musim,
 )
 
 selected_weathers = st.sidebar.multiselect(
     label="Pilih Kondisi Cuaca",
-    options=df["weather"].unique().tolist(),
-    default=df["weather"].unique().tolist(),
+    options=opsi_cuaca,
+    default=opsi_cuaca,
 )
 
 # Terapkan filter
@@ -57,10 +71,15 @@ main_df = df[
     & (df["weather"].isin(selected_weathers))
 ]
 
+if main_df.empty:
+    st.warning("Tidak ada data untuk filter yang dipilih. Ubah filter di sidebar.")
+    st.stop()
+
 # --- HEADER & KPI METRICS ---
 st.title("🚲 Bike Sharing Analytics Dashboard (2011–2012)")
 st.markdown(
-    "Dashboard interaktif untuk mengeksplorasi pola penyewaan sepeda berdasarkan jam operasional, kondisi cuaca/musim, dan pertumbuhan tahunan."
+    "Dashboard interaktif untuk mengeksplorasi pola penyewaan sepeda berdasarkan "
+    "jam operasional, musim dan cuaca, serta pertumbuhan bulanan."
 )
 
 col1, col2, col3 = st.columns(3)
@@ -74,10 +93,9 @@ with col3:
 st.markdown("---")
 
 # --- VISUALISASI 1: POLA JAM & TIPE HARI ---
-st.subheader("1. Pola Penyewaan per Jam: Hari Kerja vs Akhir Pekan/Libur")
-hourly_df = (
-    main_df.groupby(["hr", "day_type"])["cnt_hour"].mean().reset_index()
-)
+st.subheader("1. Rata-rata Penyewaan per Jam: Hari Kerja vs Akhir Pekan/Libur")
+hourly_df = main_df.groupby(["hr", "day_type"])["cnt_hour"].mean().reset_index()
+urutan_hari = [h for h in WARNA_HARI if h in hourly_df["day_type"].unique()]
 
 fig1, ax1 = plt.subplots(figsize=(12, 4))
 sns.lineplot(
@@ -85,68 +103,60 @@ sns.lineplot(
     x="hr",
     y="cnt_hour",
     hue="day_type",
+    hue_order=urutan_hari,
+    palette=WARNA_HARI,
     marker="o",
     ax=ax1,
-    palette=["#ff7f0e", "#1f77b4"],
 )
-ax1.axvspan(7, 9, color="gray", alpha=0.15, label="Jam Sibuk Pagi (07–09)")
-ax1.axvspan(17, 19, color="gray", alpha=0.15, label="Jam Sibuk Sore (17–19)")
+ax1.axvspan(6.5, 9.5, color="gray", alpha=0.15, label="Jam sibuk pagi (07.00–09.59)")
+ax1.axvspan(15.5, 19.5, color="gray", alpha=0.15, label="Jam sibuk sore (16.00–19.59)")
 ax1.set_xticks(range(0, 24))
-ax1.set_xlabel("Jam (00:00 - 23:00)")
-ax1.set_ylabel("Rata-rata Penyewaan")
-ax1.set_title(
-    "Lonjakan Penyewaan Terjadi pada Jam Komuter (08:00 & 17:00–18:00) di Hari Kerja"
-)
-ax1.legend()
+ax1.set_xlabel("Jam (00–23)")
+ax1.set_ylabel("Rata-rata penyewaan per jam")
+ax1.set_title("Rata-rata Penyewaan per Jam: Hari Kerja vs Akhir Pekan/Libur")
+ax1.legend(title="")
 st.pyplot(fig1)
+plt.close(fig1)
 
-# --- VISUALISASI 2: PENGARUH MUSIM & CUACA ---
-st.subheader("2. Pengaruh Musim dan Kondisi Cuaca terhadap Rata-rata Penyewaan")
+# --- VISUALISASI 2: MUSIM & CUACA ---
+st.subheader("2. Rata-rata Penyewaan per Jam Berdasarkan Musim dan Kondisi Cuaca")
 col_a, col_b = st.columns(2)
 
 with col_a:
-    season_df = (
-        main_df.groupby("season")["cnt_hour"]
-        .mean()
-        .sort_values(ascending=False)
-        .reset_index()
+    season_avg = (
+        main_df.groupby("season")["cnt_hour"].mean().reindex(ORDER_MUSIM).dropna()
     )
     fig2, ax2 = plt.subplots(figsize=(6, 4))
-    sns.barplot(
-        data=season_df,
-        x="season",
-        y="cnt_hour",
-        palette="Blues_d",
-        ax=ax2,
-    )
+    batang = ax2.bar(season_avg.index, season_avg.values, color="#1f77b4")
+    ax2.bar_label(batang, fmt="%.0f")
     ax2.set_xlabel("Musim")
-    ax2.set_ylabel("Rata-rata Penyewaan per Jam")
-    ax2.set_title("Rata-rata Penyewaan Tertinggi di Musim Gugur (Fall)")
+    ax2.set_ylabel("Rata-rata penyewaan per jam")
+    ax2.set_title("Rata-rata Penyewaan per Jam Berdasarkan Musim")
     st.pyplot(fig2)
+    plt.close(fig2)
 
 with col_b:
-    weather_df = (
-        main_df.groupby("weather")["cnt_hour"]
-        .mean()
-        .sort_values(ascending=False)
-        .reset_index()
+    weather_avg = (
+        main_df.groupby("weather")["cnt_hour"].mean().reindex(ORDER_CUACA).dropna()
     )
     fig3, ax3 = plt.subplots(figsize=(6, 4))
-    sns.barplot(
-        data=weather_df,
-        x="weather",
-        y="cnt_hour",
-        palette="Oranges_d",
-        ax=ax3,
-    )
-    ax3.set_xlabel("Kondisi Cuaca")
-    ax3.set_ylabel("Rata-rata Penyewaan per Jam")
-    ax3.set_title("Cuaca Buruk Menurunkan Minat Penyewaan Secara Drastis")
-    plt.xticks(rotation=15)
+    batang = ax3.bar(weather_avg.index, weather_avg.values, color="#ff7f0e")
+    ax3.bar_label(batang, fmt="%.0f")
+    ax3.set_xlabel("Kondisi cuaca")
+    ax3.set_ylabel("Rata-rata penyewaan per jam")
+    ax3.set_title("Rata-rata Penyewaan per Jam Berdasarkan Kondisi Cuaca")
+    ax3.tick_params(axis="x", rotation=15)
     st.pyplot(fig3)
+    plt.close(fig3)
 
-# --- VISUALISASI 3: TREN PERTUMBUHAN 2011 VS 2012 ---
-st.subheader("3. Tren Pertumbuhan Penyewaan Bulanan (2011 vs 2012)")
+st.caption(
+    "Catatan: grafik ini memakai rata-rata per jam dari data jam (hour.csv), "
+    "sehingga angkanya berbeda dari rata-rata per hari di notebook. "
+    "Kategori Heavy Rain/Snow hanya tercatat 3 jam, jadi rata-ratanya kurang representatif."
+)
+
+# --- VISUALISASI 3: TOTAL PENYEWAAN BULANAN ---
+st.subheader("3. Total Penyewaan Bulanan 2011–2012: Registered vs Casual")
 main_df = main_df.copy()
 main_df["year_month"] = main_df["dteday"].dt.to_period("M").astype(str)
 monthly_df = (
@@ -171,12 +181,11 @@ ax4.plot(
     color="#ff7f0e",
 )
 ax4.set_xlabel("Bulan")
-ax4.set_ylabel("Total Penyewaan")
-ax4.set_title(
-    "Pertumbuhan Konsisten di Tahun 2012 Didominasi Segmen Registered"
-)
-plt.xticks(rotation=45)
+ax4.set_ylabel("Total penyewaan per bulan")
+ax4.set_title("Total Penyewaan Bulanan: Registered vs Casual")
+ax4.tick_params(axis="x", rotation=45)
 ax4.legend()
 st.pyplot(fig4)
+plt.close(fig4)
 
 st.caption("Copyright © 2026 - Jovan Bagas Pangestu")
